@@ -54,3 +54,50 @@ test('опашката оцелява през нов инстанс (persist)',
   await ob2.flush();
   assert.equal(ob2.pending(), 0);
 });
+
+test('конкурентни add() (double-tap) не губят и не дублират събития', async () => {
+  const sent = [];
+  const pendingSends = [];
+  const ob = createOutbox({
+    storage: fakeStorage(),
+    send: (e) => new Promise((resolve, reject) => {
+      pendingSends.push({ id: e.client_id, resolve: () => { sent.push(e.client_id); resolve(); }, reject });
+    }),
+  });
+
+  // втори tap преди първият да е await-нат — старият код чете storage преди
+  // първият flush да е dequeue-нал, стартира втори flush със стар snapshot.
+  const p1 = ob.add({ client_id: 'a' });
+  const p2 = ob.add({ client_id: 'b' });
+
+  const tick = async () => { for (let i = 0; i < 8; i++) await Promise.resolve(); };
+
+  // resolve-ваме pending send-овете в реда, в който се появяват (FIFO),
+  // докато не изчезнат — броят и самоличността им зависят от имплементацията.
+  while (pendingSends.length) {
+    pendingSends.shift().resolve();
+    await tick();
+  }
+
+  await p1;
+  await p2;
+  await ob.flush();
+
+  assert.equal(sent.filter((id) => id === 'a').length, 1);
+  assert.equal(sent.filter((id) => id === 'b').length, 1);
+  assert.equal(sent.length, 2);
+  assert.equal(ob.pending(), 0);
+});
+
+test('повредено съдържание в storage не чупи outbox-а', async () => {
+  const st = fakeStorage();
+  st.setItem('outbox_v1', 'not-json');
+  const sent = [];
+  const ob = createOutbox({ storage: st, send: async (e) => sent.push(e) });
+
+  assert.equal(ob.pending(), 0);
+
+  await ob.add({ client_id: 'a' });
+  assert.deepEqual(sent.map((e) => e.client_id), ['a']);
+  assert.equal(ob.pending(), 0);
+});

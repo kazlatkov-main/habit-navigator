@@ -45,16 +45,16 @@ node --test tests/*.mjs
 
 ## Deploy (GitHub Pages)
 
-Repo-то е публично (кодът няма тайни — anon ключът е публичен по дизайн). Deploy = push към `main`:
+Repo-то е публично (кодът няма тайни — anon ключът е публичен по дизайн). Deploy = push към `master`:
 
 ```bash
 git push
 ```
 
-GitHub Pages сервира сайта от корена на `main`. Live адрес:
+GitHub Pages сервира сайта от корена на `master` (legacy build). Live адрес:
 
 ```
-https://<owner>.github.io/habit-navigator/
+https://kazlatkov-main.github.io/habit-navigator/
 ```
 
 ## На телефона

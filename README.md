@@ -1,6 +1,6 @@
 # Навигатор — Habit Navigator
 
-30-дневен gamified habit dashboard за два навика едновременно: тай-чи всеки ден и отказване от цигари с taper график. Статичен сайт (без build стъпка), който говори директно със Supabase; целта е освен подкрепа за навика, да събере чист личен dataset за бъдеща habit платформа.
+30-дневен gamified habit dashboard за два навика едновременно: тай-чи всеки ден и отказване от цигари с taper график. Статичен сайт (без build стъпка), който говори директно със Supabase; целта е освен подкрепа за навика, да събере чист личен dataset за бъдеща habit платформа. Регистрацията е отворена (не само за автора) — всеки потребител вижда само собствените си данни, изолирани през Row Level Security.
 
 Пълна спецификация: [`docs/superpowers/specs/2026-07-08-habit-navigator-design.md`](docs/superpowers/specs/2026-07-08-habit-navigator-design.md).
 
@@ -41,7 +41,9 @@ node --test tests/*.mjs
 1. **Проект:** създай нов Supabase проект (free tier е достатъчен).
 2. **Схема:** приложи миграцията [`supabase/migrations/001_init.sql`](supabase/migrations/001_init.sql) (три таблици — `settings`, `habit_days`, `craving_events` — с CHECK ограничения, RLS включен и по една „own rows" политика на таблица).
 3. **Config:** попълни `js/config.js` с `SUPABASE_URL` и `SUPABASE_ANON_KEY` (publishable / anon ключът е публичен по дизайн — RLS пази данните).
-4. **Потребител (ръчно през Dashboard):** Authentication → Users → **Add user** → email + парола, **Auto Confirm User = ON**. После Authentication → Providers/Sign-In → **изключи** „Allow new users to sign up" (приложението е за един потребител).
+4. **Потребител (ръчно през Dashboard):** Authentication → Users → **Add user** → email + парола, **Auto Confirm User = ON**.
+
+**Регистрация:** нарочно е оставена отворена (Authentication → Sign In / Providers → „Allow new users to sign up" = ON) — всеки с live адреса може сам да си направи акаунт, за да събира собствен dataset. Всяка от трите таблици има RLS политика `auth.uid() = user_id`, така че потребителите не виждат данните един на друг. Ако по-късно се реши приложението да остане за един потребител, тази настройка може да се изключи от същото място.
 
 ## Deploy (GitHub Pages)
 

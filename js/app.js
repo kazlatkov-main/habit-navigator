@@ -1,5 +1,4 @@
-// js/app.js — boot → auth → state → Днес екран + craving sheet + Прогрес (графики).
-// Табовете Постижения/Данни са празни placeholder-и (Task 9).
+// js/app.js — boot → auth → state → Днес + Прогрес + Постижения + Данни екрани, craving sheet.
 
 import { createDb } from './db.js';
 import {
@@ -11,6 +10,9 @@ import {
   cleanQualifies,
   daysMap,
   totalXp,
+  computeBadges,
+  liveMetrics,
+  HEALTH_MILESTONES,
 } from './logic.js';
 
 // ============================================================
@@ -39,6 +41,32 @@ const INSTEAD = [
   ['Отмина само', 'отмина_само'],
   ['Друго', 'друго'],
 ];
+
+// computeBadges() връща id/name/desc/unlocked — иконките са само UI, не влизат
+// в домейн логиката (js/logic.js остава чист от емоджита).
+const BADGE_ICONS = {
+  first_day: '🌱',
+  clean_car_3: '🚗',
+  taichi_week: '🥋',
+  ceil_16: '📉',
+  ceil_12: '📉',
+  ceil_8: '📉',
+  quit_day: '🚭',
+  survived_peak: '⛰️',
+  resisted_100: '💪',
+  chain_30: '🔗',
+  client_no1: '🏅',
+};
+
+// habit_days / craving_events колони по ред (виж supabase/migrations/001_init.sql) —
+// фиксиран ред за CSV, независим от JS обект key-ordering.
+const HABIT_DAYS_COLUMNS = [
+  'user_id', 'day', 'taichi_minutes', 'taichi_quality', 'state_before', 'state_after',
+  'sleep_quality', 'morning_craving', 'confidence', 'morning_done_at', 'cig_count_final',
+  'mood', 'stress', 'wife_smoked', 'alcohol', 'identity_vote', 'hardest_moment',
+  'what_helped', 'withdrawal', 'note', 'evening_done_at',
+];
+const CRAVING_EVENTS_COLUMNS = ['id', 'client_id', 'user_id', 'ts', 'kind', 'trigger', 'intensity', 'instead', 'note'];
 
 // ============================================================
 // State
@@ -211,17 +239,19 @@ function switchTab(tab) {
   for (const btn of document.querySelectorAll('#tabbar button[data-tab]')) {
     btn.classList.toggle('active', btn.dataset.tab === tab);
   }
-  // Прогрес се пресъздава при всяко влизане в таба (виж destroyProgressCharts) —
-  // покрива и „refresh() докато сме на прогрес" (renderAll → switchTab(state.tab)
-  // винаги минава оттук), и „напускане/връщане" (следващ клик тук отново).
+  // Прогрес/Постижения/Данни се пресъздават при всяко влизане в таба и при
+  // всеки refresh() докато табът вече е активен (renderAll → switchTab(state.tab)
+  // винаги минава оттук) — виж destroyProgressCharts коментара по-долу.
   if (tab === 'progress') renderProgress();
+  if (tab === 'achievements') renderAchievements();
+  if (tab === 'data') renderData();
 }
 
 function renderPlaceholders() {
   document.getElementById('tab-achievements').innerHTML =
-    '<div class="card placeholder"><p class="muted">Постижения — предстои (Task 9).</p></div>';
+    '<div class="card placeholder"><p class="muted">Зареждане…</p></div>';
   document.getElementById('tab-data').innerHTML =
-    '<div class="card placeholder"><p class="muted">Данни — предстои (Task 9).</p></div>';
+    '<div class="card placeholder"><p class="muted">Зареждане…</p></div>';
 }
 
 // ============================================================
@@ -603,6 +633,247 @@ function createWellbeingChart(dayNums, dateForDayNum, dmap) {
       plugins: { legend: { labels: { color: muted } } },
     },
   });
+}
+
+// ============================================================
+// Постижения — render (Task 9)
+//
+// Три блока: (1) грид от computeBadges() — отключена = цветна карта с иконка,
+// заключена = сива с 🔒; (2) „Живи метрики" от liveMetrics(); (3) вертикална
+// линия „Възстановяване на тялото" от HEALTH_MILESTONES спрямо quitAt.
+// ============================================================
+
+// Ден 21 (Quit Day) започва в ЛОКАЛНА полунощ на (start_date + 20 дни).
+// shiftDay() смята календарната дата (timezone-агностична аритметика на
+// низове), а тук съзнателно НЕ добавяме 'Z' към ISO низа при new Date(...) —
+// без 'Z' JS парсва като локално време, което е точно точката, от която
+// искаме да броим milestone-ите за потребител в София (UTC parse тук би
+// изместил границата с часове спрямо реалната локална полунощ).
+function quitAtDate(startDateStr) {
+  const quitDayDateStr = shiftDay(startDateStr, 20); // Ден 21 = start_date + 20 дни
+  return new Date(quitDayDateStr + 'T00:00:00');
+}
+
+function formatRemaining(ms) {
+  const minutes = Math.ceil(ms / 60000);
+  if (minutes < 60) return `след ${minutes} мин`;
+  const hours = Math.ceil(ms / (60 * 60000));
+  if (hours < 24) return `след ${hours} ч`;
+  const days = Math.ceil(ms / (24 * 60 * 60000));
+  return `след ${days} ${days === 1 ? 'ден' : 'дни'}`;
+}
+
+// Закръгля до `decimals` знака и маха излишни нули (17.0 → "17", 17.5 → "17.5").
+function trimNum(n, decimals) {
+  return String(Number(n.toFixed(decimals)));
+}
+
+function renderAchievements() {
+  const container = document.getElementById('tab-achievements');
+  if (!state.settings?.start_date) {
+    container.innerHTML = '<div class="card placeholder"><p class="muted">Планът все още не е започнал.</p></div>';
+    return;
+  }
+  const badges = computeBadges(state.days, state.events, state.settings, today);
+  const metrics = liveMetrics(state.days, state.settings);
+
+  container.innerHTML = `
+    <div class="card">
+      <h3>Постижения</h3>
+      <div class="badge-grid">${badges.map(renderBadgeCard).join('')}</div>
+    </div>
+    <div class="card">
+      <h3>Живи метрики</h3>
+      ${renderLiveMetrics(metrics)}
+    </div>
+    <div class="card">
+      <h3>Възстановяване на тялото</h3>
+      ${renderHealthTimeline()}
+    </div>`;
+}
+
+function renderBadgeCard(b) {
+  const icon = BADGE_ICONS[b.id] ?? '🏆';
+  return `
+    <div class="badge-card ${b.unlocked ? 'unlocked' : 'locked'}">
+      <div class="badge-icon">${b.unlocked ? icon : '🔒'}</div>
+      <div class="badge-name">${b.name}</div>
+      <div class="muted badge-desc">${b.desc}</div>
+    </div>`;
+}
+
+function renderLiveMetrics(metrics) {
+  const hours = (metrics.lifeMinutes / 60).toFixed(1); // изисквано: точно 1 десетичен знак
+  return `
+    <div class="metrics-row">
+      <div class="metric-box">
+        <div class="metric-num">${trimNum(metrics.notSmoked, 1)}</div>
+        <div class="muted metric-label">неизпушени цигари</div>
+      </div>
+      <div class="metric-box">
+        <div class="metric-num">${metrics.moneySaved.toFixed(2)} €</div>
+        <div class="muted metric-label">спестени</div>
+      </div>
+      <div class="metric-box">
+        <div class="metric-num">${hours}</div>
+        <div class="muted metric-label">върнати часове</div>
+      </div>
+    </div>`;
+}
+
+// Преди Quit Day целият timeline е заключен зад едно съобщение — оставащото
+// време до отделен milestone няма смисъл, докато отброяването не е започнало.
+function renderHealthTimeline() {
+  const quitAt = quitAtDate(state.settings.start_date);
+  const now = new Date();
+  if (now < quitAt) {
+    return '<p class="muted">🔒 Отключва се на Ден 21.</p>';
+  }
+  const elapsedMs = now - quitAt;
+  const items = HEALTH_MILESTONES.map((m) => {
+    const targetMs = m.minutes * 60 * 1000;
+    const reached = elapsedMs >= targetMs;
+    const status = reached ? 'достигнато' : formatRemaining(targetMs - elapsedMs);
+    return `
+      <div class="milestone-item${reached ? ' reached' : ''}">
+        <div class="milestone-mark">${reached ? '✓' : '○'}</div>
+        <div class="milestone-body">
+          <div class="milestone-label">${m.label}</div>
+          <div class="muted milestone-status">${status}</div>
+        </div>
+      </div>`;
+  }).join('');
+  return `<div class="milestone-timeline">${items}</div>`;
+}
+
+// ============================================================
+// Данни — render (Task 9)
+//
+// Износ (JSON цял snapshot / CSV две таблици) + редактируеми настройки
+// (запис при 'change' → saveSettings → refresh) + изход.
+// ============================================================
+
+function renderData() {
+  const container = document.getElementById('tab-data');
+  const s = state.settings;
+
+  container.innerHTML = `
+    <div class="card">
+      <h3>Износ на данни</h3>
+      <div class="data-actions">
+        <button type="button" class="btn-big accent" data-action="export-json">⬇️ Изтегли JSON</button>
+        <button type="button" class="btn-big" data-action="export-csv">⬇️ Изтегли CSV</button>
+      </div>
+    </div>
+    <div class="card">
+      <h3>Настройки</h3>
+      <label class="field">Цена/кутия (€)
+        <input type="number" step="0.01" min="0" class="settings-input" data-settings-field="pack_price_eur" value="${s.pack_price_eur}">
+      </label>
+      <label class="field">Цигари/кутия
+        <input type="number" step="1" min="1" class="settings-input" data-settings-field="cigs_per_pack" value="${s.cigs_per_pack}">
+      </label>
+      <label class="field">Базова линия (цигари/ден)
+        <input type="number" step="0.5" min="0" class="settings-input" data-settings-field="baseline_cigs" value="${s.baseline_cigs}">
+      </label>
+      <label class="field">Начална дата
+        <input type="date" class="settings-input" data-settings-field="start_date" value="${s.start_date}">
+      </label>
+    </div>
+    <div class="card">
+      <button type="button" class="btn-big danger" data-action="logout">Изход</button>
+    </div>`;
+}
+
+// ---------- Износ: JSON ----------
+
+function exportJson() {
+  const payload = {
+    settings: state.settings,
+    days: state.days,
+    events: state.events,
+    exported_at: new Date().toISOString(),
+  };
+  downloadBlob(`habit-navigator-export-${today}.json`, JSON.stringify(payload, null, 2), 'application/json');
+}
+
+// ---------- Износ: CSV (две таблици, RFC4180-стил escaping) ----------
+//
+// Полета с текст (note/hardest_moment/what_helped) може да съдържат запетаи,
+// кавички или нови редове (кирилица без ограничения) — обвиваме в двойни
+// кавички и удвояваме вътрешните кавички. withdrawal е jsonb обект →
+// сериализираме като JSON низ вътре в клетката (също минава през escape).
+function csvEscape(value) {
+  if (value === null || value === undefined) return '';
+  const s = typeof value === 'object' ? JSON.stringify(value) : String(value);
+  if (/[",\r\n]/.test(s)) {
+    return '"' + s.replace(/"/g, '""') + '"';
+  }
+  return s;
+}
+
+function buildCsv(columns, rows) {
+  const lines = [columns.join(',')];
+  for (const row of rows) {
+    lines.push(columns.map((col) => csvEscape(row[col])).join(','));
+  }
+  return lines.join('\r\n');
+}
+
+function exportCsv() {
+  downloadBlob('habit_days.csv', buildCsv(HABIT_DAYS_COLUMNS, state.days), 'text/csv');
+  downloadBlob('craving_events.csv', buildCsv(CRAVING_EVENTS_COLUMNS, state.events), 'text/csv');
+}
+
+function downloadBlob(filename, content, mimeType) {
+  const blob = new Blob([content], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+// ---------- Настройки: редакция ----------
+
+async function onSettingsFieldChange(input) {
+  const field = input.dataset.settingsField;
+  let value = input.value;
+  if (field === 'pack_price_eur' || field === 'baseline_cigs') {
+    value = parseFloat(value);
+    if (Number.isNaN(value)) return;
+  } else if (field === 'cigs_per_pack') {
+    value = parseInt(value, 10);
+    if (Number.isNaN(value)) return;
+  }
+  // start_date остава низ 'YYYY-MM-DD' от <input type="date">, готов за saveSettings.
+  try {
+    await state.db.saveSettings({ [field]: value });
+  } catch (err) {
+    console.error('saveSettings (data tab) failed', err);
+    toast('Грешка при запис.');
+    return;
+  }
+  toast('Запазено');
+  await refresh(); // презарежда settings → „спестени €" и др. живи метрики отразяват новата стойност
+}
+
+// ---------- Изход ----------
+
+async function onLogout() {
+  try {
+    await state.db.signOut();
+  } catch (err) {
+    console.error('signOut failed', err);
+  }
+  state.settings = null;
+  state.days = [];
+  state.events = [];
+  state.tab = 'today';
+  showLogin();
 }
 
 // ============================================================
@@ -1058,6 +1329,7 @@ function wireStaticListeners() {
   document.getElementById('sheet-root').addEventListener('click', onSheetClick);
   document.getElementById('sheet-root').addEventListener('input', onSheetInput);
   document.addEventListener('click', onGlobalClick);
+  document.addEventListener('change', onGlobalChange);
 
   // Лека периодична опресняваща на "Днес" (без мрежа) — държи outbox лентата
   // и CTA-тата (напр. „след 20:00") актуални без да чака следващ тап/смяна на таб.
@@ -1092,6 +1364,30 @@ function onGlobalClick(e) {
   const tabBtn = e.target.closest('#tabbar button[data-tab]');
   if (tabBtn) {
     switchTab(tabBtn.dataset.tab);
+    return;
+  }
+  const exportJsonBtn = e.target.closest('[data-action="export-json"]');
+  if (exportJsonBtn) {
+    exportJson();
+    return;
+  }
+  const exportCsvBtn = e.target.closest('[data-action="export-csv"]');
+  if (exportCsvBtn) {
+    exportCsv();
+    return;
+  }
+  const logoutBtn = e.target.closest('[data-action="logout"]');
+  if (logoutBtn) {
+    onLogout();
+  }
+}
+
+// Делегиран 'change' listener за таб „Данни" (полетата за настройки живеят
+// извън #sheet-root, затова не минават през onSheetInput).
+function onGlobalChange(e) {
+  const input = e.target.closest('[data-settings-field]');
+  if (input) {
+    onSettingsFieldChange(input);
   }
 }
 

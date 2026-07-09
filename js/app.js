@@ -332,33 +332,27 @@ function renderBigActions() {
 function renderCtaCards(todayRow, yesterdayRow, yesterdayDayNum, afterEvening) {
   const cards = [];
   if (!todayRow?.morning_done_at) {
-    cards.push(ctaCard('🌅 Сутрешен чекин'));
+    cards.push(ctaCard('🌅 Сутрешен чекин', 'open-morning'));
   }
   if (afterEvening && !todayRow?.evening_done_at) {
-    cards.push(ctaCard('🌙 Вечерен вход'));
+    cards.push(ctaCard('🌙 Вечерен вход', 'open-evening-today'));
   }
   if (yesterdayDayNum >= 1 && !yesterdayRow?.evening_done_at) {
-    cards.push(ctaCard('Попълни вчера'));
+    cards.push(ctaCard('Попълни вчера', 'open-evening-yesterday'));
   }
   return cards.join('');
 }
 
-function ctaCard(label) {
+function ctaCard(label, action) {
   return `
     <div class="card cta-card">
       <span>${label}</span>
-      <button type="button" class="btn-cta" data-action="cta-stub">Отвори</button>
+      <button type="button" class="btn-cta" data-action="${action}">Отвори</button>
     </div>`;
 }
 
 function renderOutboxBanner(pending) {
   return `<div class="outbox-banner">⏳ ${pending} тапа чакат връзка</div>`;
-}
-
-// CTA бутоните за сутрешен/вечерен чекин водят към форми, които се строят в Task 7.
-// Тук само визуален stub, за да не се чупи потокът на екрана.
-function handleCtaStub() {
-  toast('Тази форма идва в следваща задача (Task 7).');
 }
 
 let toastTimer = null;
@@ -390,12 +384,26 @@ function closeSheet() {
   document.getElementById('sheet-root').innerHTML = '';
 }
 
+// renderSheet() е общ dispatcher — насочва към правилния builder според
+// state.sheet.kind. Всеки builder пише директно в #sheet-root.
 function renderSheet() {
   const root = document.getElementById('sheet-root');
   if (!state.sheet) {
     root.innerHTML = '';
     return;
   }
+  const { kind } = state.sheet;
+  if (kind === 'resisted' || kind === 'smoked') {
+    renderCravingSheet();
+  } else if (kind === 'morning') {
+    renderMorningSheet();
+  } else if (kind === 'evening') {
+    renderEveningSheet();
+  }
+}
+
+function renderCravingSheet() {
+  const root = document.getElementById('sheet-root');
   const { kind, step } = state.sheet;
   const kindLabel = kind === 'resisted' ? 'УСТОЯХ' : 'ИЗПУШИХ';
   const totalSteps = kind === 'resisted' ? 3 : 2;
@@ -433,12 +441,26 @@ function dots5() {
     .join('')}</div>`;
 }
 
+// onSheetClick е общ dispatcher за всички sheet-ове (craving/morning/evening);
+// затварянето е споделено, останалото се насочва по state.sheet.kind.
 async function onSheetClick(e) {
+  if (!state.sheet) return;
   const closeBtn = e.target.closest('[data-action="sheet-close"]');
   if (closeBtn) {
     closeSheet();
     return;
   }
+  const { kind } = state.sheet;
+  if (kind === 'resisted' || kind === 'smoked') {
+    await onCravingSheetClick(e);
+  } else if (kind === 'morning') {
+    await onMorningSheetClick(e);
+  } else if (kind === 'evening') {
+    await onEveningSheetClick(e);
+  }
+}
+
+async function onCravingSheetClick(e) {
   const chip = e.target.closest('.chip');
   if (chip) {
     await handleChipTap(chip);
@@ -508,12 +530,298 @@ function showFlourish() {
 }
 
 // ============================================================
+// Сутрешен чекин — един sheet екран, тап-only (без клавиатура)
+// ============================================================
+
+const TAICHI_MIN_OPTIONS = [
+  ['2', 2],
+  ['5', 5],
+  ['10', 10],
+  ['15', 15],
+  ['20+', 20],
+  ['0 (пропуснах)', 0],
+];
+
+function openMorningSheet() {
+  state.sheet = { kind: 'morning', values: {} };
+  renderSheet();
+}
+
+function renderMorningSheet() {
+  const root = document.getElementById('sheet-root');
+  root.innerHTML = `
+    <div class="sheet-backdrop" data-action="sheet-close"></div>
+    <div class="sheet">
+      <div class="sheet-head">
+        <span class="sheet-kind morning">🌅 Сутрешен чекин</span>
+        <button type="button" class="sheet-x" data-action="sheet-close">×</button>
+      </div>
+      <div class="sheet-body">${renderMorningBody()}</div>
+    </div>`;
+}
+
+function renderMorningBody() {
+  const v = state.sheet.values;
+  // Качество на сесията и „състояние след" се показват само ако е избрано
+  // ненулево тай-чи; при 0 (пропуснах) няма сесия, за която да се питаме.
+  const showSessionFields = v.taichi_minutes !== undefined && v.taichi_minutes > 0;
+
+  const minChips = TAICHI_MIN_OPTIONS.map(([label, value]) =>
+    `<button type="button" class="chip${v.taichi_minutes === value ? ' selected' : ''}" data-chip="taichi_minutes" data-value="${value}">${label}</button>`
+  ).join('');
+
+  return `
+    <div class="field-block">
+      <h3>Тай-чи минути</h3>
+      <div class="chip-grid">${minChips}</div>
+    </div>
+    ${showSessionFields ? dotsField('taichi_quality', 'Качество на сесията', v.taichi_quality) : ''}
+    ${dotsField('state_before', 'Състояние преди', v.state_before)}
+    ${showSessionFields ? dotsField('state_after', 'Състояние след', v.state_after) : ''}
+    ${dotsField('sleep_quality', 'Сън снощи', v.sleep_quality)}
+    ${dotsField('morning_craving', 'Глад при кафето без цигара', v.morning_craving)}
+    ${dotsField('confidence', 'Увереност за тавана днес', v.confidence)}
+    <button type="button" class="btn-big accent" data-action="sheet-done">Готово</button>`;
+}
+
+async function onMorningSheetClick(e) {
+  const chip = e.target.closest('.chip[data-chip="taichi_minutes"]');
+  if (chip) {
+    const value = Number(chip.dataset.value);
+    state.sheet.values.taichi_minutes = value;
+    if (value === 0) {
+      // Полетата, скрити при 0 минути — трием евентуално вече избрани
+      // стойности, за да не изпратим остарели данни при „Готово".
+      delete state.sheet.values.taichi_quality;
+      delete state.sheet.values.state_after;
+    }
+    renderSheet(); // видимостта на quality/state_after зависи от избора тук
+    return;
+  }
+  const dot = e.target.closest('.dot');
+  if (dot) {
+    setDotValue(dot);
+    return;
+  }
+  const doneBtn = e.target.closest('[data-action="sheet-done"]');
+  if (doneBtn) {
+    await finalizeMorning();
+  }
+}
+
+async function finalizeMorning() {
+  const v = state.sheet.values;
+  const patch = { morning_done_at: new Date().toISOString() };
+  // Само докоснатите полета влизат в patch-а — недокоснати/скрити остават
+  // непроменени (NULL) в habit_days, вместо да пишем остаряла стойност.
+  for (const key of ['taichi_minutes', 'taichi_quality', 'state_before', 'state_after', 'sleep_quality', 'morning_craving', 'confidence']) {
+    if (v[key] !== undefined) patch[key] = v[key];
+  }
+  try {
+    await state.db.upsertDay(today, patch);
+  } catch (err) {
+    console.error('upsertDay (morning) failed', err);
+    toast('Грешка при запис.');
+    return;
+  }
+  closeSheet();
+  toast('+XP');
+  await refresh();
+}
+
+// ============================================================
+// Вечерен вход — един sheet екран, приема dayStr (за „Попълни вчера")
+// ============================================================
+
+// Ръчно редактируемата история е ограничена до последните 48 ч
+// (днес / вчера / по-вчера); по-стари дни остават read-only без CTA.
+function isEditableDay(dayStr) {
+  return dayStr >= shiftDay(today, -2);
+}
+
+function openEveningSheet(dayStr) {
+  if (!isEditableDay(dayStr)) {
+    toast('Този ден вече не може да се редактира.');
+    return;
+  }
+  const preloadedCigCount = state.events.filter(
+    (e) => e.kind === 'smoked' && localDay(e.ts) === dayStr
+  ).length;
+  const dayNum = dayNumber(state.settings.start_date, dayStr);
+  const values = { cig_count_final: preloadedCigCount };
+  if (dayNum >= 21) {
+    values.withdrawal = { irritability: false, focus: false, hunger: false, other: false };
+  }
+  state.sheet = { kind: 'evening', dayStr, values };
+  renderSheet();
+}
+
+function renderEveningSheet() {
+  const root = document.getElementById('sheet-root');
+  root.innerHTML = `
+    <div class="sheet-backdrop" data-action="sheet-close"></div>
+    <div class="sheet">
+      <div class="sheet-head">
+        <span class="sheet-kind evening">🌙 Вечерен вход</span>
+        <button type="button" class="sheet-x" data-action="sheet-close">×</button>
+      </div>
+      <div class="sheet-body">${renderEveningBody()}</div>
+    </div>`;
+}
+
+function renderEveningBody() {
+  const v = state.sheet.values;
+  const dayNum = dayNumber(state.settings.start_date, state.sheet.dayStr);
+  const showWithdrawal = dayNum >= 21; // симптоми след деня на отказа (ден 21+)
+
+  return `
+    <div class="field-block">
+      <h3>Цигари днес</h3>
+      <div class="stepper">
+        <button type="button" class="stepper-btn" data-action="cig-step" data-delta="-1">−</button>
+        <span class="stepper-value" id="cig-count-value">${v.cig_count_final}</span>
+        <button type="button" class="stepper-btn" data-action="cig-step" data-delta="1">+</button>
+      </div>
+    </div>
+    ${dotsField('mood', 'Настроение', v.mood)}
+    ${dotsField('stress', 'Стрес', v.stress)}
+    <div class="field-block">
+      <h3>Среда</h3>
+      <div class="toggle-row">
+        <button type="button" class="toggle${v.wife_smoked ? ' on' : ''}" data-toggle="wife_smoked">Жена ми пуши до мен</button>
+        <button type="button" class="toggle${v.alcohol ? ' on' : ''}" data-toggle="alcohol">Алкохол</button>
+      </div>
+    </div>
+    ${dotsField('identity_vote', 'Днес действах като непушач', v.identity_vote)}
+    <label class="sheet-field">Най-труден момент
+      <input type="text" class="sheet-input" data-field="hardest_moment" value="${escapeAttr(v.hardest_moment ?? '')}">
+    </label>
+    <label class="sheet-field">Какво помогна
+      <input type="text" class="sheet-input" data-field="what_helped" value="${escapeAttr(v.what_helped ?? '')}">
+    </label>
+    ${showWithdrawal ? `
+    <div class="field-block">
+      <h3>Симптоми днес</h3>
+      <div class="chip-grid">
+        <button type="button" class="chip${v.withdrawal.irritability ? ' selected' : ''}" data-withdrawal="irritability">Раздразнителност</button>
+        <button type="button" class="chip${v.withdrawal.focus ? ' selected' : ''}" data-withdrawal="focus">Трудна концентрация</button>
+        <button type="button" class="chip${v.withdrawal.hunger ? ' selected' : ''}" data-withdrawal="hunger">Глад за храна</button>
+        <button type="button" class="chip${v.withdrawal.other ? ' selected' : ''}" data-withdrawal="other">Друго</button>
+      </div>
+    </div>` : ''}
+    <label class="sheet-field">Бележка (незадължително)
+      <input type="text" class="sheet-input" data-field="note" value="${escapeAttr(v.note ?? '')}">
+    </label>
+    <button type="button" class="btn-big accent" data-action="sheet-done">Готово</button>`;
+}
+
+async function onEveningSheetClick(e) {
+  const dot = e.target.closest('.dot');
+  if (dot) {
+    setDotValue(dot);
+    return;
+  }
+  const stepBtn = e.target.closest('[data-action="cig-step"]');
+  if (stepBtn) {
+    const delta = Number(stepBtn.dataset.delta);
+    const next = Math.max(0, (state.sheet.values.cig_count_final ?? 0) + delta);
+    state.sheet.values.cig_count_final = next;
+    const valueEl = document.getElementById('cig-count-value');
+    if (valueEl) valueEl.textContent = String(next);
+    return;
+  }
+  const toggleBtn = e.target.closest('.toggle[data-toggle]');
+  if (toggleBtn) {
+    const key = toggleBtn.dataset.toggle;
+    const next = !(state.sheet.values[key] === true);
+    state.sheet.values[key] = next;
+    toggleBtn.classList.toggle('on', next);
+    return;
+  }
+  const checkBtn = e.target.closest('.chip[data-withdrawal]');
+  if (checkBtn) {
+    const key = checkBtn.dataset.withdrawal;
+    const next = !(state.sheet.values.withdrawal[key] === true);
+    state.sheet.values.withdrawal[key] = next;
+    checkBtn.classList.toggle('selected', next);
+    return;
+  }
+  const doneBtn = e.target.closest('[data-action="sheet-done"]');
+  if (doneBtn) {
+    await finalizeEvening();
+  }
+}
+
+// Текстовите полета (единствените с клавиатура в двете форми) се записват
+// през делегиран 'input' listener на #sheet-root — вижте wireStaticListeners.
+function onSheetInput(e) {
+  if (!state.sheet) return;
+  const field = e.target.dataset.field;
+  if (!field) return;
+  state.sheet.values[field] = e.target.value;
+}
+
+async function finalizeEvening() {
+  const v = state.sheet.values;
+  const dayStr = state.sheet.dayStr;
+  const patch = {
+    evening_done_at: new Date().toISOString(),
+    cig_count_final: v.cig_count_final, // винаги предзаредено при отваряне, никога undefined
+  };
+  for (const key of ['mood', 'stress', 'wife_smoked', 'alcohol', 'identity_vote']) {
+    if (v[key] !== undefined) patch[key] = v[key];
+  }
+  if (v.hardest_moment && v.hardest_moment.trim()) patch.hardest_moment = v.hardest_moment.trim();
+  if (v.what_helped && v.what_helped.trim()) patch.what_helped = v.what_helped.trim();
+  if (v.note && v.note.trim()) patch.note = v.note.trim();
+  if (v.withdrawal !== undefined) patch.withdrawal = v.withdrawal; // само за dayNum >= 21
+  try {
+    await state.db.upsertDay(dayStr, patch);
+  } catch (err) {
+    console.error('upsertDay (evening) failed', err);
+    toast('Грешка при запис.');
+    return;
+  }
+  closeSheet();
+  toast('+XP');
+  await refresh();
+}
+
+// ============================================================
+// Общи sheet помощни функции (morning + evening) — точки с група/предзаредена
+// стойност и малка escape helper за текстовите value="" атрибути
+// ============================================================
+
+function dotsField(group, label, currentValue) {
+  return `
+    <div class="field-block" data-field="${group}">
+      <h3>${label}</h3>
+      <div class="dots5">${[1, 2, 3, 4, 5]
+        .map((n) => `<button type="button" class="dot${currentValue && n <= currentValue ? ' filled' : ''}" data-value="${n}"></button>`)
+        .join('')}</div>
+    </div>`;
+}
+
+function setDotValue(dotEl) {
+  const container = dotEl.closest('[data-field]');
+  const group = container.dataset.field;
+  const value = Number(dotEl.dataset.value);
+  state.sheet.values[group] = value;
+  container.querySelectorAll('.dot').forEach((d, i) => d.classList.toggle('filled', i < value));
+}
+
+function escapeAttr(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+}
+
+// ============================================================
 // Event wiring
 // ============================================================
 
 function wireStaticListeners() {
   document.getElementById('login-form').addEventListener('submit', onLoginSubmit);
   document.getElementById('sheet-root').addEventListener('click', onSheetClick);
+  document.getElementById('sheet-root').addEventListener('input', onSheetInput);
   document.addEventListener('click', onGlobalClick);
 
   // Лека периодична опресняваща на "Днес" (без мрежа) — държи outbox лентата
@@ -531,9 +839,19 @@ function onGlobalClick(e) {
     openSheet(openBtn.dataset.kind);
     return;
   }
-  const ctaBtn = e.target.closest('[data-action="cta-stub"]');
-  if (ctaBtn) {
-    handleCtaStub();
+  const morningBtn = e.target.closest('[data-action="open-morning"]');
+  if (morningBtn) {
+    openMorningSheet();
+    return;
+  }
+  const eveningTodayBtn = e.target.closest('[data-action="open-evening-today"]');
+  if (eveningTodayBtn) {
+    openEveningSheet(today);
+    return;
+  }
+  const eveningYesterdayBtn = e.target.closest('[data-action="open-evening-yesterday"]');
+  if (eveningYesterdayBtn) {
+    openEveningSheet(shiftDay(today, -1));
     return;
   }
   const tabBtn = e.target.closest('#tabbar button[data-tab]');

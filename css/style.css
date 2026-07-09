@@ -379,3 +379,95 @@ p { margin: 0; }
   60% { transform: scale(1.15); opacity: 1; }
   100% { transform: scale(1); }
 }
+
+/* ---------- morning/evening sheet-kind ---------- */
+
+.sheet-kind.morning { color: var(--accent2); }
+.sheet-kind.evening { color: var(--accent); }
+
+/* ---------- sheet field blocks (morning/evening forms) ---------- */
+
+.field-block { margin-top: 20px; }
+
+.sheet-body .btn-big { margin-top: 24px; }
+
+/* ---------- number stepper (цигари днес) ---------- */
+
+.stepper {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 24px;
+  margin-top: 12px;
+}
+
+.stepper-btn {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  border: none;
+  background: var(--surface2);
+  color: var(--text);
+  font-size: 1.4rem;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.stepper-value {
+  font-size: 1.8rem;
+  font-weight: 800;
+  min-width: 40px;
+  text-align: center;
+}
+
+/* ---------- toggle (среда: жена ми пуши / алкохол) ---------- */
+
+.toggle-row {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.toggle {
+  background: var(--surface2);
+  border: 1px solid #2a3140;
+  color: var(--muted);
+  border-radius: 12px;
+  padding: 12px;
+  font-family: inherit;
+  font-size: .9rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.toggle.on {
+  background: var(--accent2);
+  border-color: var(--accent2);
+  color: #2a1a02;
+  font-weight: 700;
+}
+
+/* ---------- sheet text fields (най-труден момент / какво помогна / бележка) ---------- */
+
+.sheet-field {
+  display: block;
+  font-size: .85rem;
+  color: var(--muted);
+  margin-top: 16px;
+}
+
+.sheet-input {
+  display: block;
+  width: 100%;
+  margin-top: 6px;
+  padding: 12px;
+  font-size: 16px; /* избягва zoom на iOS */
+  background: var(--surface2);
+  border: 1px solid #2a3140;
+  border-radius: 12px;
+  color: var(--text);
+  font-family: inherit;
+}
+
+.sheet-input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }

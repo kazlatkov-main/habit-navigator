@@ -471,3 +471,65 @@ p { margin: 0; }
 }
 
 .sheet-input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* ---------- progress: calendar heatmap (30 дни) ---------- */
+
+.cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+  margin-top: 12px;
+}
+
+.cal-cell {
+  aspect-ratio: 1;
+  border-radius: 6px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface2);
+  border: 1px solid transparent;
+}
+
+.cal-cell.future { opacity: .35; }
+.cal-cell.today { border-color: var(--text); }
+
+.cal-half { flex: 1; }
+.cal-taichi.on { background: var(--accent); }
+.cal-clean.on { background: var(--accent2); }
+
+/* ---------- progress: Chart.js canvases ---------- */
+
+.chart-card h3 { margin-bottom: 0; }
+
+.chart-wrap {
+  position: relative;
+  height: 200px;
+  margin-top: 12px;
+}
+
+.chart-wrap canvas { width: 100% !important; height: 100% !important; }
+
+/* ---------- progress: craving hour heatmap (24 колони × 2 реда) ---------- */
+
+.craving-grid {
+  display: grid;
+  grid-template-columns: repeat(24, 1fr);
+  gap: 2px;
+  margin-top: 12px;
+}
+
+.craving-cell {
+  aspect-ratio: 1;
+  border-radius: 2px;
+  background: var(--surface2);
+}
+
+.craving-axis {
+  display: grid;
+  grid-template-columns: repeat(24, 1fr);
+  margin-top: 4px;
+  font-size: .6rem;
+  color: var(--muted);
+  text-align: center;
+}

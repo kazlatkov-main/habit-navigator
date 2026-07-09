@@ -1,5 +1,5 @@
-// js/app.js — boot → auth → state → Днес екран + craving sheet.
-// Табовете Прогрес/Постижения/Данни са празни placeholder-и (Task 7–9).
+// js/app.js — boot → auth → state → Днес екран + craving sheet + Прогрес (графики).
+// Табовете Постижения/Данни са празни placeholder-и (Task 9).
 
 import { createDb } from './db.js';
 import {
@@ -211,11 +211,13 @@ function switchTab(tab) {
   for (const btn of document.querySelectorAll('#tabbar button[data-tab]')) {
     btn.classList.toggle('active', btn.dataset.tab === tab);
   }
+  // Прогрес се пресъздава при всяко влизане в таба (виж destroyProgressCharts) —
+  // покрива и „refresh() докато сме на прогрес" (renderAll → switchTab(state.tab)
+  // винаги минава оттук), и „напускане/връщане" (следващ клик тук отново).
+  if (tab === 'progress') renderProgress();
 }
 
 function renderPlaceholders() {
-  document.getElementById('tab-progress').innerHTML =
-    '<div class="card placeholder"><p class="muted">Прогрес — предстои (Task 8).</p></div>';
   document.getElementById('tab-achievements').innerHTML =
     '<div class="card placeholder"><p class="muted">Постижения — предстои (Task 9).</p></div>';
   document.getElementById('tab-data').innerHTML =
@@ -368,6 +370,239 @@ function toast(msg) {
   el.classList.add('show');
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => el.classList.remove('show'), 2000);
+}
+
+// ============================================================
+// Прогрес — render (Task 8)
+//
+// 4 визуализации: (1) календар-heatmap 30 дни (CSS grid), (2) Chart.js line
+// цигари/ден срещу тавана, (3) heatmap гладове по час (CSS grid, локален час),
+// (4) Chart.js bar тай-чи минути + Chart.js line сън/стрес/настроение.
+//
+// Chart.js lifecycle: DESTROY-BEFORE-RECREATE. renderProgress() е единствената
+// точка, която (пре)създава Chart инстанции — при всяко влизане в таба
+// (switchTab) и при всеки renderAll() докато табът вече е активен (refresh()).
+// Първата стъпка на renderProgress() винаги е destroyProgressCharts(), преди
+// да презапишем innerHTML-а (нови canvas елементи) — така никога няма повече
+// от 1 жива Chart инстанция на canvas id и никога „Canvas is already in use".
+// ============================================================
+
+const progressCharts = { cigLine: null, taichiBar: null, wellbeing: null };
+
+function destroyProgressCharts() {
+  for (const key of Object.keys(progressCharts)) {
+    progressCharts[key]?.destroy();
+    progressCharts[key] = null;
+  }
+}
+
+function cssVar(name) {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
+
+function hexToRgba(hex, alpha) {
+  const h = hex.replace('#', '');
+  const r = parseInt(h.slice(0, 2), 16);
+  const g = parseInt(h.slice(2, 4), 16);
+  const b = parseInt(h.slice(4, 6), 16);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+// Алфа стъпки 0/.25/.5/.75/1 при брой events 0/1/2/3/4+ (виж бриф).
+function alphaForCount(n) {
+  if (n <= 0) return 0;
+  if (n === 1) return 0.25;
+  if (n === 2) return 0.5;
+  if (n === 3) return 0.75;
+  return 1;
+}
+
+function renderProgress() {
+  destroyProgressCharts();
+  const container = document.getElementById('tab-progress');
+
+  // Празно състояние: нито дневник, нито craving event — нищо за визуализация.
+  const hasData = state.days.length > 0 || state.events.length > 0;
+  if (!hasData) {
+    container.innerHTML = '<div class="card placeholder"><p class="muted">Още няма данни — първият чекин ги запалва.</p></div>';
+    return;
+  }
+
+  const start = state.settings.start_date;
+  const dmap = daysMap(state.days);
+  const dayNums = Array.from({ length: 30 }, (_, i) => i + 1);
+  const dateForDayNum = (n) => shiftDay(start, n - 1); // ден 1 = start_date
+
+  container.innerHTML = `
+    <div class="card">
+      <h3>Календар (30 дни)</h3>
+      ${buildCalendarHeatmap(dayNums, dateForDayNum, dmap)}
+    </div>
+    <div class="card chart-card">
+      <h3>Цигари/ден срещу тавана</h3>
+      <div class="chart-wrap"><canvas id="chart-cig-line"></canvas></div>
+    </div>
+    <div class="card">
+      <h3>Гладове по час</h3>
+      ${buildCravingHeatmap(state.events)}
+    </div>
+    <div class="card chart-card">
+      <h3>Тай-чи минути/ден</h3>
+      <div class="chart-wrap"><canvas id="chart-taichi-bar"></canvas></div>
+    </div>
+    <div class="card chart-card">
+      <h3>Сън / стрес / настроение</h3>
+      <div class="chart-wrap"><canvas id="chart-wellbeing"></canvas></div>
+    </div>`;
+
+  createCigLineChart(dayNums, dateForDayNum, dmap);
+  createTaichiBarChart(dayNums, dateForDayNum, dmap);
+  createWellbeingChart(dayNums, dateForDayNum, dmap);
+}
+
+// ---------- Виз 1: календар-heatmap ----------
+// Горна половина на клетката = тай-чи (taichiQualifies), долна = чист ден
+// (cleanQualifies спрямо тавана за деня). Бъдещи дни са затъмнени; днес —
+// рамка. Tooltip през title attr.
+function buildCalendarHeatmap(dayNums, dateForDayNum, dmap) {
+  const cells = dayNums.map((n) => {
+    const dateStr = dateForDayNum(n);
+    const row = dmap.get(dateStr);
+    const isFuture = dateStr > today;
+    const isToday = dateStr === today;
+    const taichiOn = taichiQualifies(row);
+    const cleanOn = cleanQualifies(row, n);
+    const taichiMin = row?.taichi_minutes ?? 0;
+    const cigLabel = (row?.cig_count_final ?? null) === null ? '—' : row.cig_count_final;
+    const ceilingVal = ceilingForDay(n);
+    const ceilingLabel = ceilingVal === null ? '—' : ceilingVal;
+    const title = `Ден ${n}: тай-чи ${taichiMin}м, ${cigLabel} цигари (таван ${ceilingLabel})`;
+    const cls = ['cal-cell'];
+    if (isFuture) cls.push('future');
+    if (isToday) cls.push('today');
+    return `
+      <div class="${cls.join(' ')}" title="${escapeAttr(title)}">
+        <div class="cal-half cal-taichi${taichiOn ? ' on' : ''}"></div>
+        <div class="cal-half cal-clean${cleanOn ? ' on' : ''}"></div>
+      </div>`;
+  });
+  return `<div class="cal-grid">${cells.join('')}</div>`;
+}
+
+// ---------- Виз 3: heatmap гладове по час ----------
+// Bucket по ЛОКАЛЕН час (new Date(ts).getHours()), не UTC — иначе тапове
+// близо до полунощ биха паднали в грешния часови сегмент за потребителя.
+function buildCravingHeatmap(events) {
+  const smokedCounts = new Array(24).fill(0);
+  const resistedCounts = new Array(24).fill(0);
+  for (const e of events) {
+    const hour = new Date(e.ts).getHours();
+    if (e.kind === 'smoked') smokedCounts[hour]++;
+    else if (e.kind === 'resisted') resistedCounts[hour]++;
+  }
+  const dangerHex = cssVar('--danger');
+  const accentHex = cssVar('--accent');
+
+  const rowHtml = (counts, hex, label) => counts.map((c, h) => {
+    const bg = c > 0 ? hexToRgba(hex, alphaForCount(c)) : 'transparent';
+    return `<div class="craving-cell" style="background:${bg}" title="${h}ч — ${label}: ${c}"></div>`;
+  }).join('');
+
+  const axisHtml = Array.from({ length: 24 }, (_, h) =>
+    `<span>${[0, 6, 12, 18, 23].includes(h) ? h : ''}</span>`
+  ).join('');
+
+  return `
+    <div class="craving-grid">
+      ${rowHtml(smokedCounts, dangerHex, 'изпушени')}
+      ${rowHtml(resistedCounts, accentHex, 'устояни')}
+    </div>
+    <div class="craving-axis">${axisHtml}</div>`;
+}
+
+// ---------- Виз 2: line цигари/ден срещу тавана ----------
+function createCigLineChart(dayNums, dateForDayNum, dmap) {
+  const canvas = document.getElementById('chart-cig-line');
+  if (!canvas) return;
+  const cigData = dayNums.map((n) => dmap.get(dateForDayNum(n))?.cig_count_final ?? null);
+  const ceilingData = dayNums.map((n) => ceilingForDay(n));
+  const textColor = cssVar('--text');
+  const accent2 = cssVar('--accent2');
+  const muted = cssVar('--muted');
+
+  progressCharts.cigLine = new Chart(canvas, {
+    type: 'line',
+    data: {
+      labels: dayNums,
+      datasets: [
+        { label: 'Цигари', data: cigData, spanGaps: true, borderColor: textColor,
+          backgroundColor: textColor, pointRadius: 2, tension: 0.15 },
+        { label: 'Таван', data: ceilingData, stepped: true, borderColor: accent2,
+          borderDash: [6, 4], pointRadius: 0, backgroundColor: 'transparent' },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      scales: {
+        x: { title: { display: true, text: 'Ден', color: muted }, ticks: { color: muted }, grid: { color: '#2a3140' } },
+        y: { beginAtZero: true, ticks: { color: muted }, grid: { color: '#2a3140' } },
+      },
+      plugins: { legend: { labels: { color: muted } } },
+    },
+  });
+}
+
+// ---------- Виз 4а: bar тай-чи минути ----------
+function createTaichiBarChart(dayNums, dateForDayNum, dmap) {
+  const canvas = document.getElementById('chart-taichi-bar');
+  if (!canvas) return;
+  const data = dayNums.map((n) => dmap.get(dateForDayNum(n))?.taichi_minutes ?? null);
+  const accent = cssVar('--accent');
+  const muted = cssVar('--muted');
+
+  progressCharts.taichiBar = new Chart(canvas, {
+    type: 'bar',
+    data: { labels: dayNums, datasets: [{ label: 'Тай-чи мин', data, backgroundColor: accent }] },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      scales: {
+        x: { ticks: { color: muted }, grid: { display: false } },
+        y: { beginAtZero: true, ticks: { color: muted }, grid: { color: '#2a3140' } },
+      },
+      plugins: { legend: { display: false } },
+    },
+  });
+}
+
+// ---------- Виз 4б: line сън/стрес/настроение (1–5 скали) ----------
+function createWellbeingChart(dayNums, dateForDayNum, dmap) {
+  const canvas = document.getElementById('chart-wellbeing');
+  if (!canvas) return;
+  const seriesFor = (key) => dayNums.map((n) => dmap.get(dateForDayNum(n))?.[key] ?? null);
+  const muted = cssVar('--muted');
+
+  progressCharts.wellbeing = new Chart(canvas, {
+    type: 'line',
+    data: {
+      labels: dayNums,
+      datasets: [
+        { label: 'Сън', data: seriesFor('sleep_quality'), spanGaps: true, borderColor: cssVar('--accent'), backgroundColor: 'transparent', pointRadius: 2 },
+        { label: 'Стрес', data: seriesFor('stress'), spanGaps: true, borderColor: cssVar('--danger'), backgroundColor: 'transparent', pointRadius: 2 },
+        { label: 'Настроение', data: seriesFor('mood'), spanGaps: true, borderColor: cssVar('--accent2'), backgroundColor: 'transparent', pointRadius: 2 },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      scales: {
+        x: { ticks: { color: muted }, grid: { color: '#2a3140' } },
+        y: { min: 1, max: 5, ticks: { color: muted, stepSize: 1 }, grid: { color: '#2a3140' } },
+      },
+      plugins: { legend: { labels: { color: muted } } },
+    },
+  });
 }
 
 // ============================================================

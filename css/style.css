@@ -123,8 +123,8 @@ p { margin: 0; }
 }
 
 .dot.filled {
-  background: var(--accent2);
-  border-color: var(--accent2);
+  background: var(--accent);
+  border-color: var(--accent);
 }
 
 /* ---------- btn-big ---------- */

@@ -1012,6 +1012,12 @@ async function handleDotTap(el) {
 }
 
 async function finalizeSheet() {
+  // Guard: на финалната стъпка автоматично напредва след wait(150)/wait(700),
+  // а state.sheet се нулира едва в самия край (closeSheet) — бърз двоен тап
+  // на последния chip/dot иначе би влязъл тук два пъти и би създал два реда
+  // в craving_events с различни client_id (дедупът по client_id не помага).
+  if (state.sheet.submitting) return;
+  state.sheet.submitting = true;
   const { kind, trigger, intensity, instead } = state.sheet;
   const payload = { ts: new Date().toISOString(), kind, trigger, intensity };
   if (kind === 'resisted') payload.instead = instead;
@@ -1116,6 +1122,11 @@ async function onMorningSheetClick(e) {
 }
 
 async function finalizeMorning() {
+  // Същият double-submit прозорец като finalizeSheet (await upsertDay преди
+  // closeSheet нулира state.sheet) — гард срещу бърз двоен тап на „Готово".
+  // При грешка връщаме флага, за да остане retry-то възможно.
+  if (state.sheet.submitting) return;
+  state.sheet.submitting = true;
   const v = state.sheet.values;
   const patch = { morning_done_at: new Date().toISOString() };
   // Само докоснатите полета влизат в patch-а — недокоснати/скрити остават
@@ -1128,6 +1139,7 @@ async function finalizeMorning() {
   } catch (err) {
     console.error('upsertDay (morning) failed', err);
     toast('Грешка при запис.');
+    state.sheet.submitting = false;
     return;
   }
   closeSheet();
@@ -1268,6 +1280,10 @@ function onSheetInput(e) {
 }
 
 async function finalizeEvening() {
+  // Същият double-submit прозорец като finalizeSheet/finalizeMorning — гард
+  // срещу бърз двоен тап на „Готово"; флагът се връща при грешка за retry.
+  if (state.sheet.submitting) return;
+  state.sheet.submitting = true;
   const v = state.sheet.values;
   const dayStr = state.sheet.dayStr;
   const patch = {
@@ -1286,6 +1302,7 @@ async function finalizeEvening() {
   } catch (err) {
     console.error('upsertDay (evening) failed', err);
     toast('Грешка при запис.');
+    state.sheet.submitting = false;
     return;
   }
   closeSheet();

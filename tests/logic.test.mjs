@@ -129,3 +129,22 @@ test('HEALTH_MILESTONES: подредени по време', () => {
   for (let i = 1; i < HEALTH_MILESTONES.length; i++)
     assert.ok(HEALTH_MILESTONES[i].minutes > HEALTH_MILESTONES[i - 1].minutes);
 });
+
+test('totalXp: устоян тап се брои по ЛОКАЛНА дата, не по UTC', () => {
+  // Timestamp, чиято локална дата може да се различава от UTC датата.
+  // Проверката е детерминистична на всяка машина: сравняваме и двете дати и
+  // твърдим, че totalXp групира по локалната (habit_days.day е локална дата).
+  const ts = '2026-07-09T22:30:00Z';
+  const utcDay = ts.slice(0, 10);                          // '2026-07-09'
+  const localDay = new Date(ts).toLocaleDateString('sv-SE');
+  // Пълен ден на localDay (тай-чи 20 + сутрин 5 + вечер 10 + под тавана 15 = 50)
+  // + един устоян тап (+5). Ако събитието се групира по UTC и utcDay!=localDay
+  // и няма ред за utcDay, +5 се губи → сумата пада на 50.
+  const days = [d(localDay, { cig_count_final: 18 })];
+  assert.equal(totalXp(days, [{ ts, kind: 'resisted' }], S.start_date), 55);
+  if (utcDay !== localDay) {
+    // На машина, където датите се разминават (напр. Europe/Sofia), UTC-групиране
+    // би сложило събитието в несъществуващ ред и би върнало 50 — този тест го лови.
+    assert.notEqual(totalXp(days, [{ ts, kind: 'resisted' }], S.start_date), 50);
+  }
+});

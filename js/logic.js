@@ -62,6 +62,11 @@ function addDays(dateStr, n) {
   return new Date(t).toISOString().slice(0, 10);
 }
 
+// Локална календарна дата ('YYYY-MM-DD') на timestamp. Събитията се групират по
+// деня, който потребителят вижда (habit_days.day е локална дата), не по UTC —
+// иначе устоян тап след локална полунощ пада в грешен ден.
+const localDayOf = (ts) => new Date(ts).toLocaleDateString('sv-SE');
+
 export const taichiQualifies = (row) => (row?.taichi_minutes ?? 0) >= 2;
 
 export function cleanQualifies(row, dayNum) {
@@ -122,7 +127,7 @@ export const HEALTH_MILESTONES = [
 export function computeBadges(days, events, settings, todayStr) {
   const start = settings.start_date;
   const dn = (dstr) => dayNumber(start, dstr);
-  const evDay = (e) => e.ts.slice(0, 10);
+  const evDay = (e) => localDayOf(e.ts);
   const smokedDriving = events.filter((e) => e.kind === 'smoked' && e.trigger === 'шофиране');
   const fullDays = days.filter((r) => r.evening_done_at);
   const dayByNum = (n) => days.find((r) => dn(r.day) === n);
@@ -163,7 +168,7 @@ export function computeBadges(days, events, settings, todayStr) {
 export function totalXp(days, events, startDateStr) {
   const evByDay = new Map();
   for (const e of events) {
-    const k = e.ts.slice(0, 10);
+    const k = localDayOf(e.ts);
     if (!evByDay.has(k)) evByDay.set(k, []);
     evByDay.get(k).push(e);
   }

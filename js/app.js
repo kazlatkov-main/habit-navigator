@@ -19,7 +19,7 @@ import {
 // Константи / речници (UI етикети ↔ snake стойности в БД)
 // ============================================================
 
-const today = new Date().toLocaleDateString('sv-SE'); // YYYY-MM-DD, локална зона
+let today = new Date().toLocaleDateString('sv-SE'); // YYYY-MM-DD, локална зона; жива стойност — виж refreshToday()
 
 const TRIGGERS = [
   ['Стрес', 'стрес'],
@@ -93,6 +93,22 @@ function shiftDay(dateStr, n) {
 // тапове близо до полунощ (локално) биха попаднали в грешния ден при UTC+.
 function localDay(isoTs) {
   return new Date(isoTs).toLocaleDateString('sv-SE');
+}
+
+// „today" се смята при зареждане, но app-ът живее отворен с дни (десктоп таб,
+// PWA resume от началния екран) — без опресняване деновият брояч/таванът замръзват,
+// а сутрешният чекин би писал в грешния ден (upsertDay(today)). Викаме я при
+// resume (visibilitychange/pageshow/focus), на 5s тика и точно преди запис;
+// при реална смяна на деня пресъздаваме активния таб (същото комбо като renderAll).
+function refreshToday() {
+  const now = new Date().toLocaleDateString('sv-SE');
+  if (now === today) return;
+  today = now;
+  console.info('[навигатор] нов ден:', today);
+  if (state.settings?.start_date && !document.getElementById('view-app').hidden) {
+    renderToday();
+    switchTab(state.tab);
+  }
 }
 
 // ============================================================
@@ -1127,6 +1143,7 @@ async function finalizeMorning() {
   // При грешка връщаме флага, за да остане retry-то възможно.
   if (state.sheet.submitting) return;
   state.sheet.submitting = true;
+  refreshToday(); // записът ключа по календарния ден — да не падне във вчера при стар resume
   const v = state.sheet.values;
   const patch = { morning_done_at: new Date().toISOString() };
   // Само докоснатите полета влизат в patch-а — недокоснати/скрити остават
@@ -1348,9 +1365,16 @@ function wireStaticListeners() {
   document.addEventListener('click', onGlobalClick);
   document.addEventListener('change', onGlobalChange);
 
+  // Смяна на деня при resume — iOS PWA/десктоп таб се събуждат със стар контекст.
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshToday(); });
+  window.addEventListener('pageshow', refreshToday);
+  window.addEventListener('focus', refreshToday);
+
   // Лека периодична опресняваща на "Днес" (без мрежа) — държи outbox лентата
   // и CTA-тата (напр. „след 20:00") актуални без да чака следващ тап/смяна на таб.
+  // refreshToday() първо: хваща и полунощ, докато app-ът стои отворен и видим.
   setInterval(() => {
+    refreshToday();
     if (state.settings?.start_date && state.tab === 'today' && !document.getElementById('tab-today').hidden) {
       renderToday();
     }

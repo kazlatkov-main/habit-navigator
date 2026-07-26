@@ -36,7 +36,23 @@ export async function createDb() {
     },
     saveSettings: async (patch) => one(sb.from('settings').upsert({ user_id: await uid(), ...patch }, { onConflict: 'user_id' }).select().single()),
     upsertDay: async (day, patch) => one(sb.from('habit_days').upsert({ user_id: await uid(), day, ...patch }, { onConflict: 'user_id,day' }).select().single()),
-    addCraving: (event) => outbox.add({ client_id: crypto.randomUUID(), ...event }),
+    addCraving: async (event) => {
+      const client_id = crypto.randomUUID();
+      await outbox.add({ client_id, ...event });
+      return client_id; // handle for the optional bonus update that may follow
+    },
+    // Bonus metrics arrive seconds after the tap. Ladder: server update first
+    // (online the row is usually flushed by then); 0 rows → the event is still
+    // queued → amend it locally; amend refused (flushed in between / head
+    // mid-send) → one server retry. RLS scopes the update to own rows.
+    updateCraving: async (client_id, extra) => {
+      const upd = () => one(sb.from('craving_events').update(extra).eq('client_id', client_id).select('id'));
+      try {
+        if ((await upd()).length) return;
+      } catch { /* offline — fall through to the local queue */ }
+      if (outbox.amend(client_id, extra)) return;
+      if (!(await upd()).length) throw new Error('craving event not found for bonus update');
+    },
     outboxPending: () => outbox.pending(),
     flushOutbox: () => outbox.flush(),
   };

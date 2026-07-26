@@ -17,8 +17,23 @@ export function createOutbox({ storage, send, key = 'outbox_v1' }) {
     return flushing;
   }
 
+  // Merge extra fields into a still-queued event (bonus metrics arrive seconds
+  // after the tap). Refuses the head while a flush is in flight — that entry may
+  // already be sent server-side and about to dequeue, so a merge would be lost;
+  // the caller falls back to a server-side update instead.
+  function amend(clientId, extra) {
+    const q = read();
+    const i = q.findIndex((e) => e.client_id === clientId);
+    if (i === -1) return false;
+    if (i === 0 && flushing) return false;
+    q[i] = { ...q[i], ...extra };
+    write(q);
+    return true;
+  }
+
   return {
     async add(event) { write([...read(), event]); await flush(); },
+    amend,
     flush,
     pending: () => read().length,
   };

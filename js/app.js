@@ -42,6 +42,26 @@ const INSTEAD = [
   ['Друго', 'друго'],
 ];
 
+// Bonus step (optional, after the core tap is saved). Emotion at the cue decides
+// which intervention fits (environment vs reward revaluation) — distinct from the
+// trigger: "пауза работа" can happen calm or wound-up.
+const EMOTIONS = [
+  ['Спокойствие', 'спокойствие'],
+  ['Напрежение', 'напрежение'],
+  ['Скука', 'скука'],
+  ['Тъга', 'тъга'],
+  ['Гняв', 'гняв'],
+  ['Радост', 'радост'],
+];
+
+// Did the craving drop after the substitute? 2/1/0 keeps per-substitute
+// effectiveness averageable in SQL.
+const RESIST_RESULT = [
+  ['Падна', '2'],
+  ['Отчасти', '1'],
+  ['Не', '0'],
+];
+
 // computeBadges() връща id/name/desc/unlocked — иконките са само UI, не влизат
 // в домейн логиката (js/logic.js остава чист от емоджита).
 const BADGE_ICONS = {
@@ -61,12 +81,12 @@ const BADGE_ICONS = {
 // habit_days / craving_events колони по ред (виж supabase/migrations/001_init.sql) —
 // фиксиран ред за CSV, независим от JS обект key-ordering.
 const HABIT_DAYS_COLUMNS = [
-  'user_id', 'day', 'taichi_minutes', 'taichi_quality', 'state_before', 'state_after',
+  'user_id', 'day', 'taichi_minutes', 'taichi_quality', 'taichi_automaticity', 'state_before', 'state_after',
   'sleep_quality', 'morning_craving', 'confidence', 'morning_done_at', 'cig_count_final',
   'mood', 'stress', 'wife_smoked', 'alcohol', 'identity_vote', 'hardest_moment',
   'what_helped', 'withdrawal', 'note', 'evening_done_at',
 ];
-const CRAVING_EVENTS_COLUMNS = ['id', 'client_id', 'user_id', 'ts', 'kind', 'trigger', 'intensity', 'instead', 'note'];
+const CRAVING_EVENTS_COLUMNS = ['id', 'client_id', 'user_id', 'ts', 'kind', 'trigger', 'intensity', 'emotion', 'instead', 'resist_worked', 'satisfaction', 'note'];
 
 // ============================================================
 // State
@@ -917,6 +937,8 @@ function renderSheet() {
   const { kind } = state.sheet;
   if (kind === 'resisted' || kind === 'smoked') {
     renderCravingSheet();
+  } else if (kind === 'bonus') {
+    renderBonusSheet();
   } else if (kind === 'morning') {
     renderMorningSheet();
   } else if (kind === 'evening') {
@@ -975,6 +997,8 @@ async function onSheetClick(e) {
   const { kind } = state.sheet;
   if (kind === 'resisted' || kind === 'smoked') {
     await onCravingSheetClick(e);
+  } else if (kind === 'bonus') {
+    await onBonusSheetClick(e);
   } else if (kind === 'morning') {
     await onMorningSheetClick(e);
   } else if (kind === 'evening') {
@@ -1037,8 +1061,9 @@ async function finalizeSheet() {
   const { kind, trigger, intensity, instead } = state.sheet;
   const payload = { ts: new Date().toISOString(), kind, trigger, intensity };
   if (kind === 'resisted') payload.instead = instead;
+  let clientId = null;
   try {
-    await state.db.addCraving(payload);
+    clientId = await state.db.addCraving(payload);
   } catch (err) {
     // addCraving пише локално в outbox-а първо, а send грешки се преглъщат вътрешно
     // (виж js/outbox.js) — тук стигаме само при наистина неочаквана грешка.
@@ -1048,13 +1073,101 @@ async function finalizeSheet() {
     showFlourish();
     await wait(700);
   }
-  closeSheet();
+  // Core row is committed; the tap counts exactly as before. The bonus screen is
+  // strictly optional — closing it loses nothing (hard rule: the tap stays 3 quick
+  // touches; richer metrics must not tax the moment). state.sheet can be null here
+  // if the user closed the sheet during the addCraving await / flourish — respect
+  // that instead of resurrecting the sheet.
+  if (clientId && state.sheet) {
+    state.sheet = { kind: 'bonus', forKind: kind, clientId, values: {}, submitting: false };
+    renderSheet();
+  } else {
+    closeSheet();
+  }
   await refresh();
 }
 
 function showFlourish() {
   const body = document.querySelector('#sheet-root .sheet-body');
   if (body) body.innerHTML = '<div class="flourish">+5 XP</div>';
+}
+
+// ============================================================
+// Bonus step — optional extras AFTER the core tap is saved
+// ============================================================
+
+// Emotion at the cue (both kinds) + experienced reward after smoking
+// (extinction curve: intensity BEFORE vs satisfaction AFTER) or substitute
+// effectiveness after resisting. Chips/dots only select — no auto-advance —
+// so both groups sit on one screen; „Запиши" commits, X/backdrop discards.
+function renderBonusSheet() {
+  const root = document.getElementById('sheet-root');
+  const { forKind } = state.sheet;
+  const kindLabel = forKind === 'resisted' ? 'УСТОЯХ' : 'ИЗПУШИХ';
+  const detail = forKind === 'smoked'
+    ? dotsField('satisfaction', 'Колко ти хареса всъщност?')
+    : `<div class="field-block"><h3>Поривът падна ли?</h3>${chipGrid(RESIST_RESULT, 'resist_worked')}</div>`;
+
+  root.innerHTML = `
+    <div class="sheet-backdrop" data-action="sheet-close"></div>
+    <div class="sheet">
+      <div class="sheet-head">
+        <span class="sheet-kind ${forKind}">${kindLabel} ✓</span>
+        <span class="muted">по желание</span>
+        <button type="button" class="sheet-x" data-action="sheet-close">×</button>
+      </div>
+      <div class="sheet-body">
+        <div class="field-block">
+          <h3>Как се чувстваше?</h3>
+          ${chipGrid(EMOTIONS, 'emotion')}
+        </div>
+        ${detail}
+        <button type="button" class="btn-big accent" data-action="sheet-done">Запиши</button>
+      </div>
+    </div>`;
+}
+
+async function onBonusSheetClick(e) {
+  const chip = e.target.closest('.chip');
+  if (chip) {
+    const group = chip.dataset.chip; // 'emotion' | 'resist_worked'
+    state.sheet.values[group] = group === 'resist_worked' ? Number(chip.dataset.value) : chip.dataset.value;
+    for (const c of chip.parentElement.querySelectorAll('.chip')) {
+      c.classList.toggle('selected', c === chip);
+    }
+    return;
+  }
+  const dot = e.target.closest('.dot');
+  if (dot) {
+    setDotValue(dot); // satisfaction — writes state.sheet.values via data-field
+    return;
+  }
+  const doneBtn = e.target.closest('[data-action="sheet-done"]');
+  if (doneBtn) {
+    await finalizeBonus();
+  }
+}
+
+async function finalizeBonus() {
+  if (state.sheet.submitting) return;
+  state.sheet.submitting = true;
+  const { clientId, forKind, values } = state.sheet;
+  const extra = {};
+  if (values.emotion) extra.emotion = values.emotion;
+  if (forKind === 'smoked' && values.satisfaction) extra.satisfaction = values.satisfaction;
+  if (forKind === 'resisted' && values.resist_worked !== undefined) extra.resist_worked = values.resist_worked;
+  if (!Object.keys(extra).length) {
+    closeSheet(); // nothing picked — the core row is already saved
+    return;
+  }
+  try {
+    await state.db.updateCraving(clientId, extra);
+    toast('Записано ✓');
+  } catch (err) {
+    console.error('bonus update failed', err);
+    toast('Грешка при запис.');
+  }
+  closeSheet();
 }
 
 // ============================================================
@@ -1104,6 +1217,7 @@ function renderMorningBody() {
       <div class="chip-grid">${minChips}</div>
     </div>
     ${showSessionFields ? dotsField('taichi_quality', 'Качество на сесията', v.taichi_quality) : ''}
+    ${showSessionFields ? dotsField('taichi_automaticity', 'Колко от само себе си дойде? (1 = навивах се, 5 = само)', v.taichi_automaticity) : ''}
     ${dotsField('state_before', 'Състояние преди', v.state_before)}
     ${showSessionFields ? dotsField('state_after', 'Състояние след', v.state_after) : ''}
     ${dotsField('sleep_quality', 'Сън снощи', v.sleep_quality)}
@@ -1121,6 +1235,7 @@ async function onMorningSheetClick(e) {
       // Полетата, скрити при 0 минути — трием евентуално вече избрани
       // стойности, за да не изпратим остарели данни при „Готово".
       delete state.sheet.values.taichi_quality;
+      delete state.sheet.values.taichi_automaticity;
       delete state.sheet.values.state_after;
     }
     renderSheet(); // видимостта на quality/state_after зависи от избора тук
@@ -1148,7 +1263,7 @@ async function finalizeMorning() {
   const patch = { morning_done_at: new Date().toISOString() };
   // Само докоснатите полета влизат в patch-а — недокоснати/скрити остават
   // непроменени (NULL) в habit_days, вместо да пишем остаряла стойност.
-  for (const key of ['taichi_minutes', 'taichi_quality', 'state_before', 'state_after', 'sleep_quality', 'morning_craving', 'confidence']) {
+  for (const key of ['taichi_minutes', 'taichi_quality', 'taichi_automaticity', 'state_before', 'state_after', 'sleep_quality', 'morning_craving', 'confidence']) {
     if (v[key] !== undefined) patch[key] = v[key];
   }
   try {

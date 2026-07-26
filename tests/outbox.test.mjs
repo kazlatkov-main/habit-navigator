@@ -89,6 +89,41 @@ test('конкурентни add() (double-tap) не губят и не дубл
   assert.equal(ob.pending(), 0);
 });
 
+test('amend merges extras into a queued event; flushed payload carries them', async () => {
+  let up = false;
+  const sent = [];
+  const ob = createOutbox({ storage: fakeStorage(), send: async (e) => { if (!up) throw new Error('offline'); sent.push(e); } });
+  await ob.add({ client_id: 'a', kind: 'smoked', intensity: 4 });
+  assert.equal(ob.amend('a', { emotion: 'скука', satisfaction: 2 }), true);
+  up = true;
+  await ob.flush();
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].emotion, 'скука');
+  assert.equal(sent[0].satisfaction, 2);
+  assert.equal(sent[0].intensity, 4); // original fields intact
+});
+
+test('amend returns false for an unknown/already-flushed client_id', async () => {
+  const ob = createOutbox({ storage: fakeStorage(), send: async () => {} });
+  await ob.add({ client_id: 'a' }); // flushed immediately
+  assert.equal(ob.amend('a', { emotion: 'тъга' }), false);
+  assert.equal(ob.amend('never-existed', { emotion: 'тъга' }), false);
+});
+
+test('amend refuses the queue head while a flush is in flight', async () => {
+  let release;
+  const ob = createOutbox({
+    storage: fakeStorage(),
+    send: () => new Promise((resolve) => { release = resolve; }),
+  });
+  const p = ob.add({ client_id: 'a' }); // flush starts, send hangs
+  await Promise.resolve();
+  assert.equal(ob.amend('a', { emotion: 'гняв' }), false); // head mid-send → refuse
+  release();
+  await p;
+  assert.equal(ob.pending(), 0);
+});
+
 test('повредено съдържание в storage не чупи outbox-а', async () => {
   const st = fakeStorage();
   st.setItem('outbox_v1', 'not-json');

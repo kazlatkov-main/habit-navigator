@@ -175,3 +175,16 @@ export function totalXp(days, events, startDateStr) {
   return days.reduce((sum, row) =>
     sum + xpForDay(row, evByDay.get(row.day) ?? [], dayNumber(startDateStr, row.day)), 0);
 }
+
+// Строи payload-а за bonus update-а от избраните стойности. Чиста функция —
+// UI-ят (finalizeBonus) я вика; тестваема без DOM. `note` е свободен текст
+// (контекст „защо"); контекстът успех/неуспех идва от kind на реда, не оттук.
+export function bonusExtra(forKind, values = {}) {
+  const extra = {};
+  if (values.emotion) extra.emotion = values.emotion;
+  if (forKind === 'smoked' && values.satisfaction) extra.satisfaction = values.satisfaction;
+  if (forKind === 'resisted' && values.resist_worked !== undefined) extra.resist_worked = values.resist_worked;
+  const note = values.note?.trim();
+  if (note) extra.note = note;
+  return extra;
+}

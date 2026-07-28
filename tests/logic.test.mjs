@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { dayNumber, ceilingForDay, xpForDay, levelForXp, streak, taichiQualifies, cleanQualifies, maxRun, computeBadges,
-         liveMetrics, totalXp, HEALTH_MILESTONES } from '../js/logic.js';
+         liveMetrics, totalXp, HEALTH_MILESTONES, bonusExtra } from '../js/logic.js';
 
 test('dayNumber: start date е Ден 1', () => {
   assert.equal(dayNumber('2026-07-09', '2026-07-09'), 1);
@@ -147,4 +147,40 @@ test('totalXp: устоян тап се брои по ЛОКАЛНА дата, �
     // би сложило събитието в несъществуващ ред и би върнало 50 — този тест го лови.
     assert.notEqual(totalXp(days, [{ ts, kind: 'resisted' }], S.start_date), 50);
   }
+});
+
+test('bonusExtra: note (smoked) се включва и се trim-ва', () => {
+  assert.deepEqual(
+    bonusExtra('smoked', { note: '  кафе + клиент закъсня  ' }),
+    { note: 'кафе + клиент закъсня' },
+  );
+});
+
+test('bonusExtra: note (resisted) се включва', () => {
+  assert.deepEqual(bonusExtra('resisted', { note: 'излязох навън' }), { note: 'излязох навън' });
+});
+
+test('bonusExtra: празен/whitespace note се пропуска', () => {
+  assert.deepEqual(bonusExtra('smoked', { note: '   ' }), {});
+  assert.deepEqual(bonusExtra('smoked', {}), {});
+});
+
+test('bonusExtra: note се комбинира с emotion + satisfaction (smoked)', () => {
+  assert.deepEqual(
+    bonusExtra('smoked', { emotion: 'напрежение', satisfaction: 2, note: 'по навик' }),
+    { emotion: 'напрежение', satisfaction: 2, note: 'по навик' },
+  );
+});
+
+test('bonusExtra: resist_worked=0 се включва; satisfaction се игнорира при resisted', () => {
+  assert.deepEqual(
+    bonusExtra('resisted', { resist_worked: 0, satisfaction: 5, note: 'пих вода' }),
+    { resist_worked: 0, note: 'пих вода' },
+  );
+});
+
+test('bonusExtra: satisfaction само за smoked; resist_worked само за resisted', () => {
+  assert.deepEqual(bonusExtra('smoked', { satisfaction: 3 }), { satisfaction: 3 });
+  assert.deepEqual(bonusExtra('smoked', { resist_worked: 2 }), {});
+  assert.deepEqual(bonusExtra('resisted', { satisfaction: 3 }), {});
 });

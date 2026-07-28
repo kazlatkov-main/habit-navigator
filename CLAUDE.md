@@ -1,5 +1,17 @@
 # Simplexity Habit — CLAUDE.md
-*Last updated: 2026-07-16 · Owner: Kris Kazlatkov (kazlatkov@gmail.com)*
+
+---
+
+## 🎯 North Star — Приоритет №1 (записано 2026-07-28)
+
+Основната работа по този проект **НЕ е да се изпълни поведенческата цел** (отказване от цигари, тай-чи в ежедневието). Основната работа е **да се НАУЧИ СИСТЕМАТА върху входящите данни**. Приложението е преди всичко събирач на данни; Крис = клиент №1 и източник на данни, не „пациент за оздравяване сега".
+
+Приоритет №1 на цялата работа: с данните, които приложението събира, да научим системата да работи **по-стойностно, по-структурирано и по-устойчиво**. Затова **качеството на събираните данни е критично** — качествени входящи данни → качествено обучение → по-стойностни всички downstream стъпки.
+
+**Milestones (Quit Day, taper графикът) са downstream** и стават реални едва щом системата е функционална. Сега НЕ е: Quit Day не е устойчив, не е реален, няма достатъчно контекст, не е конфигуриран правилно — впускане в него сега = разход на време и ресурси. Оперативно следствие: работи по data-first аксиомата (адаптирай системата спрямо данните и качеството на улавяне), не по фиксирана поведенческа цел. Пълен контекст в wiki-то: Habit-Navigator.md §North Star + Качество-на-улавяне-журнал-vs-живо.md.
+
+---
+*Last updated: 2026-07-28 · Owner: Kris Kazlatkov (kazlatkov@gmail.com)*
 
 ---
 
@@ -25,6 +37,7 @@ Note: display/brand name is "Simplexity Habit"; the stable technical slug stays 
 
 ## D · Decisions
 *One line each.*
+- 2026-07-28 — North Star: приоритет №1 е обучение на системата върху качествени входящи данни, не изпълнение на поведенческата цел; Quit Day и taper са downstream. Виж секцията North Star най-горе + wiki Habit-Navigator.md.
 - `2026-07-09` — Open registration kept intentional (multi-user via RLS `auth.uid() = user_id`), not single-user.
 - `2026-07-16` — Moved from `~/code/habit-navigator` to `~/Desktop/Personal Projects/Simplexity-Habit/`; same git repo (origin unchanged), display name → "Simplexity Habit", slug stays `habit-navigator`.
 - `2026-07-16` — CLAUDE.md lives in the public repo (Kris approved) — no secrets here, only structure + pointers.

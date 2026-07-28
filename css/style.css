@@ -481,6 +481,8 @@ p { margin: 0; }
 
 .sheet-input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
 
+textarea.sheet-input { min-height: 4.5rem; resize: vertical; line-height: 1.4; }
+
 /* ---------- progress: calendar heatmap (30 дни) ---------- */
 
 .cal-grid {

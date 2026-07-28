@@ -13,6 +13,7 @@ import {
   computeBadges,
   liveMetrics,
   HEALTH_MILESTONES,
+  bonusExtra,
 } from './logic.js';
 
 // ============================================================
@@ -1107,6 +1108,9 @@ function renderBonusSheet() {
   const detail = forKind === 'smoked'
     ? dotsField('satisfaction', 'Колко ти хареса всъщност?')
     : `<div class="field-block"><h3>Поривът падна ли?</h3>${chipGrid(RESIST_RESULT, 'resist_worked')}</div>`;
+  const notePrompt = forKind === 'smoked'
+    ? 'Какво се случи? Какво го предизвика?'
+    : 'Какво ти помогна да устоиш?';
 
   root.innerHTML = `
     <div class="sheet-backdrop" data-action="sheet-close"></div>
@@ -1122,6 +1126,9 @@ function renderBonusSheet() {
           ${chipGrid(EMOTIONS, 'emotion')}
         </div>
         ${detail}
+        <label class="sheet-field">${notePrompt}
+          <textarea class="sheet-input" data-field="note" rows="3" placeholder="по желание — няколко думи"></textarea>
+        </label>
         <button type="button" class="btn-big accent" data-action="sheet-done">Запиши</button>
       </div>
     </div>`;
@@ -1152,10 +1159,7 @@ async function finalizeBonus() {
   if (state.sheet.submitting) return;
   state.sheet.submitting = true;
   const { clientId, forKind, values } = state.sheet;
-  const extra = {};
-  if (values.emotion) extra.emotion = values.emotion;
-  if (forKind === 'smoked' && values.satisfaction) extra.satisfaction = values.satisfaction;
-  if (forKind === 'resisted' && values.resist_worked !== undefined) extra.resist_worked = values.resist_worked;
+  const extra = bonusExtra(forKind, values);
   if (!Object.keys(extra).length) {
     closeSheet(); // nothing picked — the core row is already saved
     return;

@@ -10,20 +10,28 @@
 
 **Milestones (Quit Day, taper графикът) са downstream** и стават реални едва щом системата е функционална. Сега НЕ е: Quit Day не е устойчив, не е реален, няма достатъчно контекст, не е конфигуриран правилно — впускане в него сега = разход на време и ресурси. Оперативно следствие: работи по data-first аксиомата (адаптирай системата спрямо данните и качеството на улавяне), не по фиксирана поведенческа цел. Пълен контекст в wiki-то: Habit-Navigator.md §North Star + Качество-на-улавяне-журнал-vs-живо.md.
 
+(North Star-ът е **Фаза 2** дисциплината от по-голямата рамка — виж §Direction.)
+
 ---
-*Last updated: 2026-07-28 · Owner: Kris Kazlatkov (kazlatkov@gmail.com)*
+
+## 🧭 Direction / Architecture (записано 2026-07-30)
+
+Проектът е в **pivot към универсален habit-OS** (4 фази × 4 степени на компетентност), не еднократно приложение за отказване. **Канонична архитектура:** `docs/superpowers/specs/2026-07-30-habit-os-vision-and-program-design.md` (wiki огледало [[Habit-OS-Vision]]). Работи като **програма от под-проекти** — всеки получава свой `spec → plan → build`; изпълнените планове се архивират в `~/Simplexity/wiki/vault/Simplexity/Habit-Navigator-Executed-Plans/`. **Прочети визията преди архитектурна/планова работа.** Quest = гръбнак на насоки/прогрес/onboarding, със заложени **reward-integrity правила** (capture НЕ се награждава по обем — пази качеството на данните; йерархия на наградата; North Star = quest-line за дълбочина; наградата затихва към автономност). Секвениране: core loop преди скелето (икономика/социално).
+
+---
+*Last updated: 2026-07-30 · Owner: Kris Kazlatkov (kazlatkov@gmail.com)*
 
 ---
 
 ## A · What this folder is
-**Simplexity Habit** — the customer-facing habit-change product (brand name). This repo is its running prototype, historically named **Habit-Navigator**: a gamified 30-day habit dashboard, built and live. It is the anti-dependency habit tool for KAN clients, and its first real dataset (Kris = client #1, tai-chi + quit-smoking). Stage: **live prototype, single real user, collecting data.**
+**Simplexity Habit** — the customer-facing habit-change product (brand name). This repo is its running prototype, historically named **Habit-Navigator**: a gamified 30-day habit dashboard, built and live. It is the anti-dependency habit tool for KAN clients, and its first real dataset (Kris = client #1, tai-chi + quit-smoking). Stage: **live prototype, single real user, collecting data** — and the running substrate/prototype for the **universal habit-OS** the project is pivoting toward (see §Direction / [[Habit-OS-Vision]]).
 
 Note: display/brand name is "Simplexity Habit"; the stable technical slug stays **`habit-navigator`** (repo, URL, Pinecone `project` tag) — do NOT rename the slug without a deliberate migration (it would force re-tagging + schema churn).
 
 ## B · The Goal
 - **Why it exists:** give KAN clients a tool that builds autonomy, not dependency — a tracker that closes the loop (review → adapt), not just logs streaks. Product spec = the 5 maintenance pillars (see Memory Map).
 - **Done looks like:** installable app (PWA) clients open in one tap; captures the habit-loop signals (cue/craving/response/reward) with graded friction; feeds a clean dataset back to the KAN platform.
-- **Out of scope (now):** the customer RAG-bot (future — IDEA-041, needs curated public corpus + GDPR scoping); multi-habit generalization beyond the current tai-chi/smoking case.
+- **Out of scope (now):** the customer RAG-bot (future — IDEA-041, needs curated public corpus + GDPR scoping); the scaffolding (economy/social) before the core loop works for one habit. NOTE: multi-habit **universalization is now the program direction** (see §Direction / [[Habit-OS-Vision]]) — no longer out of scope; it is decomposed into sequenced sub-projects.
 
 ## C · Stack
 - **Frontend:** static site (GitHub Pages), no build step — `index.html` + ES modules; `supabase-js` v2 + Chart.js via CDN.
@@ -37,6 +45,7 @@ Note: display/brand name is "Simplexity Habit"; the stable technical slug stays 
 
 ## D · Decisions
 *One line each.*
+- `2026-07-30` — **Pivot: универсален habit-OS (program-level решение).** Декомпозиция на под-проекти (Ф1–Ф4 + cross-cutting), quest-гръбнак + reward integrity, универсален data model. Виж §Direction + vision spec / [[Habit-OS-Vision]].
 - 2026-07-28 — North Star: приоритет №1 е обучение на системата върху качествени входящи данни, не изпълнение на поведенческата цел; Quit Day и taper са downstream. Виж секцията North Star най-горе + wiki Habit-Navigator.md.
 - `2026-07-09` — Open registration kept intentional (multi-user via RLS `auth.uid() = user_id`), not single-user.
 - `2026-07-16` — Moved from `~/code/habit-navigator` to `~/Desktop/Personal Projects/Simplexity-Habit/`; same git repo (origin unchanged), display name → "Simplexity Habit", slug stays `habit-navigator`.
